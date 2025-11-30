@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>로컬 무작위 암호 생성기</title>
+<style>
+  :root { --bg:#0f172a; --card:#111827; --muted:#9ca3af; --fg:#e5e7eb; --accent:#60a5fa; --ok:#34d399; --warn:#fbbf24; --bad:#f87171; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:linear-gradient(180deg,#0b1220,#0f172a 40%); color:var(--fg); font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Malgun Gothic,sans-serif; }
+  .wrap { max-width:860px; margin:48px auto; padding:0 16px; }
+  h1 { font-size:28px; margin:0 0 16px; letter-spacing:.3px }
+  p.lead { color:var(--muted); margin:0 0 24px }
+  .card { background:rgba(17,24,39,.75); backdrop-filter: blur(6px); border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1 1 300px; }
+  input[type="text"] { width:100%; padding:14px 16px; font-size:18px; border-radius:12px; border:1px solid rgba(255,255,255,.12); background:#0b1020; color:var(--fg); letter-spacing:.5px;}
+  .btn { cursor:pointer; border:none; border-radius:12px; padding:12px 16px; background:var(--accent); color:#041018; font-weight:700; transition:.15s transform; }
+  .btn:active { transform: translateY(1px); }
+  .btn.ghost { background:transparent; color:var(--fg); border:1px solid rgba(255,255,255,.15) }
+  .btn.small{ padding:8px 10px; border-radius:10px; font-weight:600 }
+  .kvs { display:flex; gap:16px; flex-wrap:wrap; margin-top:14px; }
+  .kvs label{ display:flex; align-items:center; gap:8px; background:#0c1224; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.06) }
+  input[type="checkbox"], input[type="radio"] { width:16px; height:16px; }
+  .len { margin:14px 0 4px; display:flex; align-items:center; gap:10px; color:var(--muted) }
+  input[type="range"]{ width:280px }
+  .hint { color:var(--muted); font-size:12px }
+  .meter{ height:10px; border-radius:999px; background:#111827; border:1px solid rgba(255,255,255,.08); overflow:hidden }
+  .bar{ height:100%; width:0%; background:var(--bad); transition: width .2s ease }
+  .tag{ font-weight:700; padding:4px 8px; border-radius:999px; margin-left:8px; }
+  .tag.bad{ background:var(--bad); color:#000 }
+  .tag.warn{ background:var(--warn); color:#000 }
+  .tag.ok{ background:var(--ok); color:#00140a }
+  .foot{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:16px; color:var(--muted) }
+  code { background:#0b1020; padding:2px 6px; border-radius:6px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>로컬 무작위 암호 생성기</h1>
+    <p class="lead">오프라인 동작 · <b>crypto.getRandomValues()</b> 사용 · 설정 자동저장 · 복사 버튼/단축키 지원</p>
+
+    <div class="card">
+      <div class="row">
+        <input id="output" class="grow" type="text" spellcheck="false" autocomplete="off" />
+        <button id="btnGen" class="btn" title="새 암호 생성 (Ctrl/⌘+G)">생성</button>
+        <button id="btnCopy" class="btn ghost" title="복사 (Ctrl/⌘+C)">복사</button>
+      </div>
+
+      <div class="len">
+        <span>암호 길이: <b id="lenLabel">16</b></span>
+        <input id="len" type="range" min="8" max="64" value="16" />
+        <button id="minus" class="btn small ghost" title="-1">−</button>
+        <button id="plus"  class="btn small ghost" title="+1">＋</button>
+      </div>
+
+      <div class="kvs">
+        <label><input type="checkbox" id="optA" checked /> 대문자 (A–Z)</label>
+        <label><input type="checkbox" id="opta" checked /> 소문자 (a–z)</label>
+        <label><input type="checkbox" id="opt1" checked /> 숫자 (0–9)</label>
+        <label><input type="checkbox" id="optS" /> 기호 (!@#…)</label>
+        <label><input type="checkbox" id="optAmb" /> 헷갈리는 글자 제외 (O0lI1…)</label>
+        <label><input type="checkbox" id="optReqEach" checked /> 각 선택군 최소 1자 포함</label>
+      </div>
+
+      <div style="margin-top:14px">
+        <div class="meter"><div id="bar" class="bar"></div></div>
+        <div class="foot">
+          <div>추정 강도: <span id="entropy">0</span> bits <span id="grade" class="tag bad">약함</span></div>
+          <div class="hint">단축키: <code>Ctrl/⌘+G</code> 생성, <code>Ctrl/⌘+C</code> 복사</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="hint" style="margin-top:14px">
+      보안 팁: 사이트마다 다른 암호를 쓰고, 가능하면 패스키/2FA를 함께 사용하세요. 브라우저/OS 클립보드는 공유될 수 있으니 공용 PC에서는 복사본을 빨리 지우세요.
+    </p>
+  </div>
+
+<script>
+(() => {
+  // --- 안전한 난수 ---
+  const rng = (n) => {
+    const buf = new Uint32Array(n);
+    crypto.getRandomValues(buf);
+    return buf;
+  };
+
+  // --- 문자집합 정의 ---
+  const sets = {
+    A: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    a: "abcdefghijklmnopqrstuvwxyz",
+    d: "0123456789",
+    s: "!@#$%^&*()-_=+[]{};:,.?/|~",
+  };
+  const ambiguous = "O0oIl1|`'\";:.,{}[]()<>\\/";
+
+  // --- 요소 ---
+  const $ = (id) => document.getElementById(id);
+  const out = $("output"), btnGen = $("btnGen"), btnCopy = $("btnCopy");
+  const slider = $("len"), lenLabel = $("lenLabel"), minus=$("minus"), plus=$("plus");
+  const optA=$("optA"), opta=$("opta"), opt1=$("opt1"), optS=$("optS");
+  const optAmb=$("optAmb"), optReqEach=$("optReqEach");
+  const entropy=$("entropy"), bar=$("bar"), grade=$("grade");
+
+  // --- 저장/복원 ---
+  const load = () => {
+    try {
+      const s = JSON.parse(localStorage.getItem("pwgen-v1")||"{}");
+      if (s.len) slider.value = s.len;
+      ["optA","opta","opt1","optS","optAmb","optReqEach"].forEach(k=>{
+        if (typeof s[k] === "boolean") $(k).checked = s[k];
+      });
+    } catch {}
+    lenLabel.textContent = slider.value;
+  };
+  const save = () => {
+    const s = {
+      len: +slider.value,
+      optA: optA.checked, opta: opta.checked, opt1: opt1.checked, optS: optS.checked,
+      optAmb: optAmb.checked, optReqEach: optReqEach.checked
+    };
+    localStorage.setItem("pwgen-v1", JSON.stringify(s));
+  };
+
+  // --- 풀 구성 ---
+  function buildPool() {
+    let pool = "";
+    if (optA.checked) pool += sets.A;
+    if (opta.checked) pool += sets.a;
+    if (opt1.checked) pool += sets.d;
+    if (optS.checked) pool += sets.s;
+    if (optAmb.checked) pool = [...pool].filter(ch => !ambiguous.includes(ch)).join("");
+    return pool;
+  }
+
+  // --- 강도 측정 (풀 크기 ^ 길이 의 로그2) ---
+  function updateStrength(len, poolSize) {
+    const bits = Math.round(len * Math.log2(Math.max(2, poolSize)));
+    entropy.textContent = bits;
+    let pct = Math.min(100, Math.round(bits / 1.2)); // 시각적 스케일
+    bar.style.width = pct + "%";
+    let label = "약함", cls="bad";
+    if (bits >= 100) { label="매우 강함"; cls="ok"; }
+    else if (bits >= 80) { label="강함"; cls="ok"; }
+    else if (bits >= 60) { label="보통"; cls="warn"; }
+    else { label="약함"; cls="bad"; }
+    grade.textContent = label;
+    grade.className = "tag " + cls;
+  }
+
+  // --- 최소 1자씩 포함 강제 샘플링 ---
+  function sampleWithRequirements(len, pools) {
+    const result = new Array(len);
+    let i = 0;
+
+    // 각 선택군에서 하나씩
+    const required = pools.filter(p => p.set.length>0);
+    for (const p of required) {
+      result[i++] = p.set[ rng(1)[0] % p.set.length ];
+    }
+    // 나머지 무작위
+    const all = pools.map(p=>p.set).join("");
+    for (; i < len; i++) {
+      result[i] = all[ rng(1)[0] % all.length ];
+    }
+    // 셔플 (Fisher–Yates)
+    for (let j = result.length - 1; j > 0; j--) {
+      const k = rng(1)[0] % (j + 1);
+      [result[j], result[k]] = [result[k], result[j]];
+    }
+    return result.join("");
+  }
+
+  // --- 생성 ---
+  function generate() {
+    const len = +slider.value;
+    const pools = [];
+    if (optA.checked) pools.push({name:"A", set: sets.A});
+    if (opta.checked) pools.push({name:"a", set: sets.a});
+    if (opt1.checked) pools.push({name:"d", set: sets.d});
+    if (optS.checked) pools.push({name:"s", set: sets.s});
+
+    if (optAmb.checked) {
+      for (let p of pools) p.set = [...p.set].filter(ch=>!ambiguous.includes(ch)).join("");
+    }
+
+    const pool = pools.map(p=>p.set).join("");
+    if (!pool) { out.value = ""; updateStrength(0,0); alert("최소 한 가지 문자군을 선택하세요."); return; }
+    if (optReqEach.checked && pools.length > len) { alert("선택한 문자군 수가 길이보다 많습니다."); return; }
+
+    let pwd = optReqEach.checked ? sampleWithRequirements(len, pools)
+                                 : (()=>{ let s=""; for(let i=0;i<len;i++) s += pool[ rng(1)[0] % pool.length ]; return s; })();
+
+    out.value = pwd;
+    updateStrength(len, pool.length);
+    save();
+  }
+
+  function copy() {
+    if (!out.value) return;
+    out.select();
+    document.execCommand("copy");
+    // 시각 피드백
+    btnCopy.textContent = "복사됨!";
+    setTimeout(()=>btnCopy.textContent="복사", 900);
+    window.getSelection().removeAllRanges();
+  }
+
+  // --- 이벤트 ---
+  load();
+  generate();
+
+  slider.addEventListener("input", e => { lenLabel.textContent = slider.value; updateStrength(+slider.value, buildPool().length); });
+  [optA,opta,opt1,optS,optAmb,optReqEach].forEach(el=>{
+    el.addEventListener("change", () => { save(); updateStrength(+slider.value, buildPool().length); });
+  });
+
+  btnGen.addEventListener("click", generate);
+  btnCopy.addEventListener("click", copy);
+  minus.addEventListener("click", ()=>{ slider.value = Math.max(8, +slider.value-1); lenLabel.textContent=slider.value; updateStrength(+slider.value, buildPool().length); save(); });
+  plus.addEventListener("click", ()=>{ slider.value = Math.min(64, +slider.value+1); lenLabel.textContent=slider.value; updateStrength(+slider.value, buildPool().length); save(); });
+
+  // 단축키
+  window.addEventListener("keydown", (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === "g") { e.preventDefault(); generate(); }
+    if (mod && e.key.toLowerCase() === "c") { /* 브라우저 기본 복사 유지, 선택 없을 때만 처리 */ if (!document.activeElement || document.activeElement.id !== "output") { e.preventDefault(); copy(); } }
+  });
+})();
+</script>
+</body>
+</html>
